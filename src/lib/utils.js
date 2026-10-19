@@ -10,17 +10,3 @@ export const fmtDate = (d) =>
 export const fmtMoney = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(n || 0)
 export const isToday = (d) => d && new Date(d).toDateString() === new Date().toDateString()
-
-const CSV_COLS = ['id', 'created_at', 'full_name', 'nationality', 'passport_number', 'visa_type', 'status', 'fee', 'email', 'phone']
-
-export function exportCsv(rows, name = 'applications') {
-  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const csv = [CSV_COLS.join(','), ...rows.map((r) => CSV_COLS.map((c) => esc(r[c])).join(','))].join('\n')
-  // BOM so Excel opens UTF-8 (Arabic names) correctly
-  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(a.href)
-}

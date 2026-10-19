@@ -35,3 +35,30 @@ alter table applications
 -- Reminder: the user app must read `status`, `user_feedback` and `visa_pdf_url` to show updates.
 -- Never expose `admin_notes_log` to users (it is only reachable by admin under the policies above, but
 -- exclude it from any user-facing select or view).
+
+-- v3: full CRUD + settings (run once)
+create policy "admin insert applications" on applications for insert with check (public.is_admin());
+create policy "admin delete applications" on applications for delete using (public.is_admin());
+
+create table if not exists admin_settings (
+  id int primary key default 1 check (id = 1),
+  data jsonb not null default '{}'::jsonb,
+  updated_at timestamptz default now(),
+  updated_by text
+);
+alter table admin_settings enable row level security;
+create policy "admin all settings" on admin_settings for all using (public.is_admin()) with check (public.is_admin());
+-- Optional: let the user app read fees / intake status (it contains no secrets, but you may prefer a view with only `fees` and `ops`):
+-- create policy "public read settings" on admin_settings for select using (true);
+-- Note: manual "New application" inserts fail if your table has NOT NULL columns I don't set (e.g. user_id).
+
+-- v4: related applicant data (names, passports) must be readable by the admin too
+grant select, insert, update, delete on public.applicants to authenticated;
+drop policy if exists "admin read applicants"   on public.applicants;
+drop policy if exists "admin update applicants" on public.applicants;
+drop policy if exists "admin insert applicants" on public.applicants;
+drop policy if exists "admin delete applicants" on public.applicants;
+create policy "admin read applicants"   on public.applicants for select to authenticated using (public.is_admin());
+create policy "admin update applicants" on public.applicants for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "admin insert applicants" on public.applicants for insert to authenticated with check (public.is_admin());
+create policy "admin delete applicants" on public.applicants for delete to authenticated using (public.is_admin());

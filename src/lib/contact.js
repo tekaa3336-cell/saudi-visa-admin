@@ -1,10 +1,11 @@
 import { STATUSES } from './utils'
 
 // Saudi local mobiles (05xxxxxxxx) get +966; 00-prefixed numbers are normalised; others are used as-is.
-export function waNumber(phone) {
+export function waNumber(phone, cc = '966') {
   let d = String(phone || '').replace(/\D/g, '')
   if (d.startsWith('00')) d = d.slice(2)
-  else if (/^05\d{8}$/.test(d)) d = '966' + d.slice(1)
+  else if (d.startsWith('0')) d = cc + d.slice(1)
+  else if (cc === '966' && /^5\d{8}$/.test(d)) d = cc + d
   return d
 }
 
@@ -24,8 +25,8 @@ export function statusMessage(status, r, extra = '') {
   return [head, body, extra && extra.trim()].filter(Boolean).join('\n')
 }
 
-export function whatsappUrl(r, text) {
-  const n = waNumber(r.phone)
+export function whatsappUrl(r, text, cc) {
+  const n = waNumber(r.phone, cc)
   return n ? `https://wa.me/${n}?text=${encodeURIComponent(text)}` : null
 }
 
