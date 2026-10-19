@@ -19,7 +19,7 @@ function Toggle({ checked, onChange, label, hint }) {
   )
 }
 
-export default function Settings({ settings, loading, error, saving, onSave, rows, onUpdateRows, notify, dark, setDark }) {
+export default function Settings({ settings, loading, error, saving, onSave, rows, notify, dark, setDark }) {
   const [d, setD] = useState(null)
   const [newType, setNewType] = useState('')
   useEffect(() => { if (settings) setD(structuredClone(settings)) }, [settings])
@@ -32,27 +32,19 @@ export default function Settings({ settings, loading, error, saving, onSave, row
   const setFee = (t, v) => setD((x) => { const fees = { ...x.fees }; if (v === '') delete fees[t]; else fees[t] = Number(v); return { ...x, fees } })
   const addType = () => { const t = newType.trim(); if (t && d.fees[t] === undefined) setD((x) => ({ ...x, fees: { ...x.fees, [t]: 0 } })); setNewType('') }
   const save = async () => { const err = await onSave(d); notify(err ? `Save failed: ${err}` : 'Settings saved', err ? 'error' : 'success') }
-  const applyFee = async (t) => {
-    const ids = rows.filter((r) => r.status === 'pending' && r.visa_type === t).map((r) => r.id)
-    const err = await onUpdateRows(ids, { fee: d.fees[t] })
-    notify(err ? `Update failed: ${err}` : `Fee ${d.fees[t]} applied to ${ids.length} pending application(s)`, err ? 'error' : 'success')
-  }
-
   return (
     <div className="mx-auto max-w-3xl space-y-4 pb-24">
       {error && <p className="rounded-md bg-amber-100 p-3 text-sm text-amber-900">Settings could not be loaded from Supabase ({error}). Run the v3 block of supabase/admin_setup.sql, then reload. Defaults are shown.</p>}
 
-      <Card title="Visa fees" hint="Fee per visa type (SAR). The user app can read these from admin_settings to price new requests.">
+      <Card title="Visa fees" hint="Reference fee per visa type for the user app to read from admin_settings. Each application's actual amount (total_cost) is shown in the dashboard.">
         <ul className="divide-y divide-slate-100 dark:divide-white/10">
           {types.length === 0 && <li className="py-3 text-sm text-slate-500">No visa types yet. Add one below.</li>}
           {types.map((t) => {
-            const pending = rows.filter((r) => r.status === 'pending' && r.visa_type === t).length
             const configured = d.fees[t] !== undefined
             return (
               <li key={t} className="flex flex-wrap items-center gap-2 py-2.5">
                 <span className="min-w-[140px] flex-1 text-sm font-medium">{t}</span>
                 <input aria-label={`Fee for ${t}`} type="number" min="0" className="field w-28" placeholder="Fee" value={d.fees[t] ?? ''} onChange={(e) => setFee(t, e.target.value)} />
-                <button className="btn-ghost" disabled={!configured || !pending || dirty} title={dirty ? 'Save settings first' : ''} onClick={() => applyFee(t)}>Apply to {pending} pending</button>
                 <button aria-label={`Remove ${t}`} className="btn-ghost" disabled={!configured} onClick={() => setFee(t, '')}><Trash2 size={15} /></button>
               </li>
             )

@@ -21,3 +21,20 @@ export async function fileUrl(value, bucket = DOCS_BUCKET) {
   const [b, ...rest] = value.split('/') // storage_key may be stored as "bucket/path/file.jpg"
   return sign(b, rest.join('/'))
 }
+
+// Signed links for a stored file: `url` to view it, `download` forces a save-as with the original file name.
+export async function fileLinks(value, filename, bucket = DOCS_BUCKET) {
+  if (!value) return { error: 'no storage_key' }
+  if (/^https?:\/\//.test(value)) return { url: value, download: value }
+  const sign = (b, k, opts) => supabase.storage.from(b).createSignedUrl(k, 3600, opts)
+  let b = bucket, k = value
+  let res = await sign(b, k)
+  if (res.error && value.includes('/')) { // key stored as "bucket/path/file"
+    const [b2, ...rest] = value.split('/')
+    const alt = await sign(b2, rest.join('/'))
+    if (!alt.error) { res = alt; b = b2; k = rest.join('/') }
+  }
+  if (res.error) return { error: res.error.message }
+  const dl = await sign(b, k, { download: filename || true })
+  return { url: res.data.signedUrl, download: dl.data?.signedUrl || res.data.signedUrl }
+}

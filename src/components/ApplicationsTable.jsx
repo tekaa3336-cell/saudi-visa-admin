@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Search, Download, X, Check, XCircle, MessageSquareWarning, RefreshCw, Trash2, Inbox, SearchX, ChevronDown } from 'lucide-react'
 import { Skeleton, EmptyState } from './Skeleton'
 import Confirm from './Confirm'
-import { STATUSES, fmtDate } from '../lib/utils'
+import { STATUSES, fmtDate, fmtNum } from '../lib/utils'
 import { exportCsv, exportXlsx } from '../lib/export'
 
 const PAGE = 50
@@ -117,7 +117,7 @@ export default function ApplicationsTable({ rows, loading, error, reload, onOpen
                 <td className="p-3 tabular-nums">{r.passport_number || '—'}</td>
                 <td className="p-3">{r.visa_type || '—'}</td>
                 <td className="p-3">{fmtDate(r.created_at)}</td>
-                <td className="p-3 tabular-nums">{r.fee ?? '—'}</td>
+                <td className="p-3 tabular-nums">{fmtNum(r.fee) ?? '—'}</td>
                 <td className="p-3" onClick={(e) => e.stopPropagation()}>
                   <select aria-label={`Status for ${r.full_name}`} value={r.status}
                     onChange={async (e) => { const s = e.target.value; const err = await onUpdate(r.id, { status: s }); result(err, `${r.full_name}: ${STATUSES[s].label}`) }}

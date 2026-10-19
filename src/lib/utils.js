@@ -10,3 +10,4 @@ export const fmtDate = (d) =>
 export const fmtMoney = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'SAR', maximumFractionDigits: 0 }).format(n || 0)
 export const isToday = (d) => d && new Date(d).toDateString() === new Date().toDateString()
+export const fmtNum = (n) => (n == null || n === '' || Number.isNaN(Number(n)) ? undefined : Number(n).toFixed(2))

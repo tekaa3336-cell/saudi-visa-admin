@@ -93,8 +93,7 @@ export default function App() {
             onCreate={create} notify={notify} services={services} />
         )}
         {route === 'settings' && (
-          <Settings settings={settings} loading={settingsLoading} error={settingsError} saving={saving} onSave={save} rows={rows}
-            onUpdateRows={update} notify={notify} dark={dark} setDark={setDark} />
+          <Settings settings={settings} loading={settingsLoading} error={settingsError} saving={saving} onSave={save} rows={rows} notify={notify} dark={dark} setDark={setDark} />
         )}
       </main>
 

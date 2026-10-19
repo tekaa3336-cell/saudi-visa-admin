@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { A_KEYS, first, serviceName } from '../lib/applicant'
+import { A_KEYS, first, serviceName, prettyService } from '../lib/applicant'
 
 // Schema: applicants.application_id → applications.id (one applicant row per application); applicants(full_name, nationality, passport_number, phone, email,
 // date_of_birth, country_of_residence) ; services is looked up separately to turn service_id into a readable name.
@@ -10,15 +10,17 @@ const NO_ROWS = 'No rows changed – check the admin RLS policies (supabase/admi
 const shape = (r) => ({ ...r, applicants: Array.isArray(r.applicants) ? r.applicants[0] : r.applicants })
 
 // flatten applicant fields + readable visa type onto the row the UI reads
-const norm = (r, svc) => {
+const norm = (r, svc, contacts = {}) => {
   const a = r.applicants
+  const c = contacts[r.user_id]
   const get = (keys) => first(r, keys) ?? first(a, keys)
   const full = get(['full_name', 'name']) ?? ([first(a, ['first_name']), first(a, ['last_name'])].filter(Boolean).join(' ') || undefined)
   return {
     ...r, applicant: a, full_name: full,
-    passport_number: get(['passport_number']), nationality: get(['nationality']), email: get(['email']), phone: get(['phone']),
+    passport_number: get(['passport_number']), nationality: get(['nationality']), email: get(['email']) ?? c?.email, phone: get(['phone']) ?? c?.phone,
+    fee: r.total_cost ?? r.fee,
     date_of_birth: get(['date_of_birth']), country_of_residence: get(['country_of_residence']),
-    visa_type: svc[r.service_id] ?? first(r, ['visa_type']) ?? r.service_id,
+    visa_type: svc[r.service_id] ?? first(r, ['visa_type']) ?? prettyService(r.service_id),
   }
 }
 
@@ -47,9 +49,47 @@ export function useApplications({ enabled = true, onNew } = {}) {
   const rawRef = useRef(raw); rawRef.current = raw
   const own = useRef(new Set())
 
-  const svcMap = useMemo(() => Object.fromEntries(services.map((s) => [s.id, s.name])), [services])
+  const svcMap = useMemo(() => Object.fromEntries(services.flatMap((s) => s.keys.map((k) => [k, s.name]))), [services])
   const svcRef = useRef(svcMap); svcRef.current = svcMap
-  const rows = useMemo(() => raw.map((r) => norm(r, svcMap)), [raw, svcMap])
+  // options for the "New application" dropdown, using the same service_id format existing applications use
+  const serviceOptions = useMemo(() => {
+    const used = new Set(raw.map((r) => r.service_id).filter(Boolean).map(String))
+    const known = new Set(services.flatMap((s) => s.keys))
+    return [
+      ...services.map((s) => ({ id: s.keys.find((k) => used.has(k)) ?? s.id, name: s.name })),
+      ...[...used].filter((u) => !known.has(u)).map((u) => ({ id: u, name: prettyService(u) })),
+    ]
+  }, [services, raw])
+  const [contacts, setContacts] = useState({})
+  const asked = useRef(new Set())
+  const rows = useMemo(() => raw.map((r) => norm(r, svcMap, contacts)), [raw, svcMap, contacts])
+
+  // Applicant email/phone can be empty: fall back to the account that created the application (applications.user_id)
+  useEffect(() => {
+    if (!enabled) return
+    const need = [...new Set(raw.filter((r) => r.user_id && !asked.current.has(r.user_id) &&
+      !(first(r.applicants, ['email']) && first(r.applicants, ['phone']))).map((r) => r.user_id))]
+    if (!need.length) return
+    need.forEach((id) => asked.current.add(id))
+    ;(async () => {
+      const out = {}
+      for (let i = 0; i < need.length; i += 100) {
+        const ids = need.slice(i, i + 100)
+        const rpc = await supabase.rpc('admin_user_contacts', { uids: ids }) // reads auth.users (SQL v7)
+        if (rpc.error) console.warn('admin_user_contacts unavailable:', rpc.error.message)
+        else for (const u of rpc.data || []) out[u.id] = { email: u.email || undefined, phone: u.phone || undefined }
+        const missing = ids.filter((id) => !out[id]?.email || !out[id]?.phone)
+        if (!missing.length) continue
+        let pr = await supabase.from('profiles').select('*').in('id', missing)
+        if (pr.error) pr = await supabase.from('profiles').select('*').in('user_id', missing)
+        if (!pr.error) for (const p of pr.data || []) {
+          const id = missing.includes(p.id) ? p.id : p.user_id
+          out[id] = { email: out[id]?.email || first(p, ['email']), phone: out[id]?.phone || first(p, ['phone', 'phone_number', 'mobile', 'whatsapp']) }
+        }
+      }
+      setContacts((c) => ({ ...c, ...out }))
+    })()
+  }, [raw, enabled])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -63,7 +103,7 @@ export function useApplications({ enabled = true, onNew } = {}) {
     load()
     supabase.from('services').select('*').then(({ data, error }) => {
       if (error) console.warn('services lookup failed (visa type will show the raw service_id):', error.message)
-      else setServices(data.map((s) => ({ id: s.id, name: serviceName(s) })))
+      else setServices(data.map((s) => ({ id: s.id, name: serviceName(s), keys: [s.id, s.code, s.slug, s.key].filter((v) => v != null).map(String) })))
     })
     const ch = supabase.channel('applications-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, (p) => {
@@ -132,5 +172,5 @@ export function useApplications({ enabled = true, onNew } = {}) {
     if (error || !data?.length) { setRaw(prev); return error?.message || NO_ROWS }
   }, [])
 
-  return { rows, services, loading, error, live, reload: load, update, create, remove }
+  return { rows, services: serviceOptions, loading, error, live, reload: load, update, create, remove }
 }

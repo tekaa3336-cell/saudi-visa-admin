@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, Printer, MessageCircle, Mail, Upload, FileText, Send, Loader2, Trash2, Wand2, Pencil } from 'lucide-react'
+import { ArrowLeft, Printer, MessageCircle, Mail, Upload, FileText, Send, Loader2, Trash2, Wand2, Pencil, ExternalLink, Download } from 'lucide-react'
 import StatusBadge from './StatusBadge'
 import LiveBadge from './LiveBadge'
 import Confirm from './Confirm'
 import { useAuth } from '../context/AuthContext'
-import { supabase, fileUrl } from '../lib/supabase'
-import { STATUSES, fmtDate } from '../lib/utils'
+import { supabase, fileUrl, fileLinks } from '../lib/supabase'
+import { STATUSES, fmtDate, fmtNum } from '../lib/utils'
 import { statusMessage, whatsappUrl, mailtoUrl } from '../lib/contact'
 import { A_KEYS, serviceName } from '../lib/applicant'
 
@@ -14,8 +14,34 @@ const FIELDS = (r) => [
   ['Full name', r.full_name], ['Nationality', r.nationality], ['Passport number', r.passport_number],
   ['Visa type', r.visa_type], ['Email', r.email], ['Phone', r.phone],
   ['Date of birth', r.date_of_birth], ['Residence', r.country_of_residence],
-  ['Submitted', fmtDate(r.created_at)], ['Fee', r.fee], ['Application ID', r.id],
+  ['Submitted', fmtDate(r.created_at)], ['Total cost', fmtNum(r.total_cost ?? r.fee)], ['Service fee', fmtNum(r.service_fee)], ['Government fee', fmtNum(r.government_fee)], ['Application ID', r.id],
 ]
+
+const isImg = (d) => /\.(png|jpe?g|webp|gif|avif|bmp|svg)$/i.test(d?.file_name || d?.storage_key || '')
+const linkBtn = 'inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium hover:bg-slate-100 dark:border-white/20 dark:hover:bg-white/10'
+
+function Doc({ label, doc, loading }) {
+  return (
+    <figure className="flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5">
+      {doc?.url
+        ? isImg(doc)
+          ? <a href={doc.url} target="_blank" rel="noreferrer"><img loading="lazy" src={doc.url} alt={label} className="h-56 w-full bg-slate-100 object-contain dark:bg-black/30" /></a>
+          : <a href={doc.url} target="_blank" rel="noreferrer" className="grid h-56 place-items-center text-sm"><span className="flex flex-col items-center gap-2"><FileText size={32} />{doc.file_name || 'Open file'}</span></a>
+        : <div className="grid h-56 place-items-center px-3 text-center text-sm text-slate-400">
+            {doc ? `File found but could not be opened: ${doc.error || 'unknown error'}. Check the storage policy (SQL v5) and VITE_DOCS_BUCKET.` : loading ? 'Loading…' : 'No file uploaded'}
+          </div>}
+      <figcaption className="mt-auto flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-sm dark:border-white/10">
+        <span className="truncate text-slate-500" title={label}>{label}</span>
+        {doc?.url && (
+          <span className="flex shrink-0 gap-1.5">
+            <a className={linkBtn} href={doc.url} target="_blank" rel="noreferrer"><ExternalLink size={12} />Open</a>
+            <a className={linkBtn} href={doc.download} download={doc.file_name || true}><Download size={12} />Download</a>
+          </span>
+        )}
+      </figcaption>
+    </figure>
+  )
+}
 
 export default function DetailView({ row: base, live, cc, onClose, onUpdate, onDelete, notify }) {
   const { user } = useAuth()
@@ -46,7 +72,7 @@ export default function DetailView({ row: base, live, cc, onClose, onUpdate, onD
     let alive = true
     ;(async () => {
       const { data, error } = await supabase.from('documents').select('*').eq('application_id', row.id)
-      const list = await Promise.all((data || []).map(async (d) => ({ ...d, url: await fileUrl(d.storage_key) })))
+      const list = await Promise.all((data || []).map(async (d) => ({ ...d, ...(await fileLinks(d.storage_key, d.file_name)) })))
       const visa = await fileUrl(row.visa_pdf_url, 'visa-documents')
       if (alive) { setDocs(list); setDocsErr(error?.message || ''); setUrls({ visa }) }
     })()
@@ -76,9 +102,11 @@ export default function DetailView({ row: base, live, cc, onClose, onUpdate, onD
     return () => { alive = false }
   }, [base.id, base.applicants, base.service_id, base.visa_type])
 
-  const passport = docs?.find((d) => /passport/i.test(d.document_type || ''))
-  const photo = docs?.find((d) => d !== passport && /photo|selfie|picture|portrait|personal/i.test(d.document_type || ''))
+  const tag = (d) => `${d.document_type || ''} ${d.file_name || ''}`
+  const passport = docs?.find((d) => /passport|جواز/i.test(tag(d)))
+  const photo = docs?.find((d) => d !== passport && /photo|selfie|picture|portrait|personal|صورة/i.test(tag(d)))
   const others = (docs || []).filter((d) => d !== passport && d !== photo)
+  const classified = !!(passport || photo)
 
   useEffect(() => {
     const esc = (e) => e.key === 'Escape' && onClose()
@@ -125,18 +153,6 @@ export default function DetailView({ row: base, live, cc, onClose, onUpdate, onD
     const err = await onDelete([row.id]); setConfirmDel(false)
     if (err) notify(`Delete failed: ${err}`, 'error'); else { notify('Application deleted'); onClose() }
   }
-
-  const isImg = (d) => /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(d?.file_name || d?.storage_key || '')
-  const Doc = ({ label, doc }) => (
-    <figure className="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-white/10 dark:bg-white/5">
-      {doc?.url
-        ? isImg(doc)
-          ? <a href={doc.url} target="_blank" rel="noreferrer"><img src={doc.url} alt={label} className="h-72 w-full bg-slate-100 object-contain dark:bg-black/30" /></a>
-          : <a href={doc.url} target="_blank" rel="noreferrer" className="grid h-72 place-items-center text-sm underline"><span className="flex flex-col items-center gap-2"><FileText size={28} />{doc.file_name || 'Open file'}</span></a>
-        : <div className="grid h-72 place-items-center px-3 text-center text-sm text-slate-400">{doc ? 'File found but could not be opened (storage permission or bucket name)' : docs === null ? 'Loading…' : 'No file uploaded'}</div>}
-      <figcaption className="border-t border-slate-200 px-3 py-2 text-sm text-slate-500 dark:border-white/10">{label}</figcaption>
-    </figure>
-  )
 
   return (
     <>
@@ -195,12 +211,13 @@ export default function DetailView({ row: base, live, cc, onClose, onUpdate, onD
             </div>
 
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-3"><Doc label="Passport copy" doc={passport} /><Doc label="Applicant photo" doc={photo} /></div>
+              {(classified || docs?.length === 0) && <div className="grid grid-cols-2 gap-3"><Doc label="Passport copy" doc={passport} loading={docs === null} /><Doc label="Applicant photo" doc={photo} loading={docs === null} /></div>}
               {docsErr && <p className="rounded-md bg-amber-100 p-2 text-sm text-amber-900">Could not load documents: {docsErr}. Run the v5 SQL.</p>}
               {others.length > 0 && (
-                <ul className="space-y-1 text-sm">{others.map((d) => (
-                  <li key={d.id}><a className="underline" href={d.url || undefined} target="_blank" rel="noreferrer">{d.document_type || 'Document'} · {d.file_name || d.storage_key}</a></li>
-                ))}</ul>
+                <section>
+                  <h3 className="mb-2 text-sm font-medium">{classified ? 'Other documents' : `Uploaded documents (${others.length})`}</h3>
+                  <div className="grid grid-cols-2 gap-3">{others.map((d) => <Doc key={d.id ?? d.storage_key} label={`${d.document_type || 'Document'} · ${d.file_name || ''}`} doc={d} />)}</div>
+                </section>
               )}
               <section>
                 <div className="mb-1 flex items-center justify-between">

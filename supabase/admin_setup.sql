@@ -85,3 +85,22 @@ do $$ begin
   begin alter publication supabase_realtime add table public.applicants;
   exception when duplicate_object then null; end;
 end $$;
+
+-- v7: applicant contact fallback via the account that created the application (applications.user_id)
+create or replace function public.admin_user_contacts(uids uuid[])
+returns table (id uuid, email text, phone text)
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  if not public.is_admin() then raise exception 'not authorized'; end if;
+  return query select u.id, u.email::text, u.phone::text from auth.users u where u.id = any(uids);
+end $$;
+revoke all on function public.admin_user_contacts(uuid[]) from public, anon;
+grant execute on function public.admin_user_contacts(uuid[]) to authenticated;
+
+do $$ begin
+  if to_regclass('public.profiles') is not null then
+    execute 'grant select on public.profiles to authenticated';
+    execute 'drop policy if exists "admin read profiles" on public.profiles';
+    execute 'create policy "admin read profiles" on public.profiles for select to authenticated using (public.is_admin())';
+  end if;
+end $$;

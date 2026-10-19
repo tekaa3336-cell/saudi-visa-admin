@@ -1,7 +1,7 @@
 import { STATUSES } from './utils'
 
 const COLS = [['id', 'ID'], ['created_at', 'Submitted'], ['full_name', 'Name'], ['nationality', 'Nationality'], ['passport_number', 'Passport'],
-  ['visa_type', 'Visa type'], ['status', 'Status'], ['fee', 'Fee'], ['email', 'Email'], ['phone', 'Phone']]
+  ['visa_type', 'Visa type'], ['status', 'Status'], ['fee', 'Total cost'], ['service_fee', 'Service fee'], ['government_fee', 'Government fee'], ['email', 'Email'], ['phone', 'Phone']]
 
 const toRows = (rows) => rows.map((r) => Object.fromEntries(COLS.map(([k, h]) => [h,
   k === 'created_at' ? (r[k] || '').slice(0, 10) : k === 'status' ? (STATUSES[r[k]]?.label ?? r[k]) : (r[k] ?? '')])))
