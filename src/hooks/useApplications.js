@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { A_KEYS, first, serviceName } from '../lib/applicant'
 
 // Schema: applicants.application_id → applications.id (one applicant row per application); applicants(full_name, nationality, passport_number, phone, email,
 // date_of_birth, country_of_residence) ; services is looked up separately to turn service_id into a readable name.
 const SELECT = '*, applicants(*)'
-const A_KEYS = ['full_name', 'nationality', 'passport_number', 'phone', 'email', 'date_of_birth', 'country_of_residence']
 const NO_ROWS = 'No rows changed – check the admin RLS policies (supabase/admin_setup.sql, v3–v5)'
 
-const first = (o, keys) => { for (const k of keys) if (o?.[k] != null && o[k] !== '') return o[k] }
 const shape = (r) => ({ ...r, applicants: Array.isArray(r.applicants) ? r.applicants[0] : r.applicants })
-const serviceName = (s) => first(s, ['name', 'name_en', 'title', 'label', 'slug', 'code']) ?? String(s.id)
 
 // flatten applicant fields + readable visa type onto the row the UI reads
 const norm = (r, svc) => {
@@ -27,9 +25,11 @@ const norm = (r, svc) => {
 const ORDER = { ascending: false }
 const fetchAll = async () => {
   const res = await supabase.from('applications').select(SELECT).order('created_at', ORDER).limit(2000)
-  if (!res.error) return res
-  console.warn('applicants embed failed, joining manually:', res.error.message)
-  const flat = await supabase.from('applications').select('*').order('created_at', ORDER).limit(2000)
+  const hasApplicant = (x) => (Array.isArray(x.applicants) ? x.applicants.length > 0 : !!x.applicants)
+  // an embed returns [] (no error) when the FK is missing/uncached or RLS hides the rows, so check for emptiness too
+  if (!res.error && (!res.data.length || res.data.some(hasApplicant))) return res
+  console.warn('applicants embed failed or empty, joining manually:', res.error?.message)
+  const flat = res.error ? await supabase.from('applications').select('*').order('created_at', ORDER).limit(2000) : res
   if (flat.error) return flat
   const { data: ap, error } = await supabase.from('applicants').select('*').limit(5000)
   if (error) { console.warn('applicants lookup failed:', error.message); return flat }

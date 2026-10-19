@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, Printer, MessageCircle, Mail, Upload, FileText, Send, Loader2, Trash2, Wand2, Pencil } from 'lucide-react'
 import StatusBadge from './StatusBadge'
@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase, fileUrl } from '../lib/supabase'
 import { STATUSES, fmtDate } from '../lib/utils'
 import { statusMessage, whatsappUrl, mailtoUrl } from '../lib/contact'
+import { A_KEYS, serviceName } from '../lib/applicant'
 
 const FIELDS = (r) => [
   ['Full name', r.full_name], ['Nationality', r.nationality], ['Passport number', r.passport_number],
@@ -16,8 +17,18 @@ const FIELDS = (r) => [
   ['Submitted', fmtDate(r.created_at)], ['Fee', r.fee], ['Application ID', r.id],
 ]
 
-export default function DetailView({ row, live, cc, onClose, onUpdate, onDelete, notify }) {
+export default function DetailView({ row: base, live, cc, onClose, onUpdate, onDelete, notify }) {
   const { user } = useAuth()
+  const [extra, setExtra] = useState({}) // applicant / service fetched directly when the list join came back empty
+  const [issues, setIssues] = useState([])
+  const row = useMemo(() => {
+    let r = base
+    if (extra.applicant) {
+      const fill = Object.fromEntries(A_KEYS.filter((k) => r[k] == null || r[k] === '').map((k) => [k, extra.applicant[k]]).filter(([, v]) => v != null))
+      r = { ...r, applicants: extra.applicant, ...fill }
+    }
+    return extra.service ? { ...r, visa_type: extra.service } : r
+  }, [base, extra])
   const [urls, setUrls] = useState({})
   const [docs, setDocs] = useState(null)
   const [docsErr, setDocsErr] = useState('')
@@ -41,6 +52,29 @@ export default function DetailView({ row, live, cc, onClose, onUpdate, onDelete,
     })()
     return () => { alive = false }
   }, [row.id, row.visa_pdf_url])
+
+  // Fallback: if the list join gave no applicant (or an unresolved visa service), query those tables directly and report what the database refuses.
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const found = [], got = {}
+      if (!base.applicants) {
+        const { data, error } = await supabase.from('applicants').select('*').eq('application_id', base.id)
+        if (error) found.push(`applicants: ${error.message}`)
+        else if (!data.length) found.push('applicants: 0 rows visible for this application (row-level security is hiding it, or no row exists)')
+        else got.applicant = data[0]
+      }
+      if (!base.service_id) found.push('applications.service_id is empty for this application')
+      else if (base.visa_type == null || base.visa_type === base.service_id) {
+        const { data, error } = await supabase.from('services').select('*').eq('id', base.service_id).maybeSingle()
+        if (error) found.push(`services: ${error.message}`)
+        else if (!data) found.push('services: 0 rows visible for this service_id (RLS, or the table has a different name)')
+        else got.service = serviceName(data)
+      }
+      if (alive) { setExtra(got); setIssues(found) }
+    })()
+    return () => { alive = false }
+  }, [base.id, base.applicants, base.service_id, base.visa_type])
 
   const passport = docs?.find((d) => /passport/i.test(d.document_type || ''))
   const photo = docs?.find((d) => d !== passport && /photo|selfie|picture|portrait|personal/i.test(d.document_type || ''))
@@ -124,6 +158,16 @@ export default function DetailView({ row, live, cc, onClose, onUpdate, onDelete,
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
           <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-2">
             <div className="space-y-6">
+              {(issues.length > 0 || (docs && docs.length === 0)) && (
+                <div role="alert" className="rounded-md bg-amber-100 p-3 text-sm text-amber-900">
+                  <p className="font-medium">Some data could not be read with this admin login:</p>
+                  <ul className="ml-4 list-disc">
+                    {issues.map((i) => <li key={i}>{i}</li>)}
+                    {docs && docs.length === 0 && !docsErr && <li>documents: 0 rows visible for this application</li>}
+                  </ul>
+                  <p className="mt-1">Run supabase/fix_admin_access.sql in the Supabase SQL editor, then reload.</p>
+                </div>
+              )}
               {editing ? <EditForm row={row} onSave={saveEdit} onCancel={() => setEditing(false)} /> : (
               <dl className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white px-4 dark:divide-white/10 dark:border-white/10 dark:bg-white/5">
                 {FIELDS(row).map(([k, v]) => (
