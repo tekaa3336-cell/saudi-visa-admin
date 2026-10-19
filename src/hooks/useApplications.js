@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-// Schema: applications(service_id, applicant_id, …) → applicants(full_name, nationality, passport_number, phone, email,
+// Schema: applicants.application_id → applications.id (one applicant row per application); applicants(full_name, nationality, passport_number, phone, email,
 // date_of_birth, country_of_residence) ; services is looked up separately to turn service_id into a readable name.
 const SELECT = '*, applicants(*)'
 const A_KEYS = ['full_name', 'nationality', 'passport_number', 'phone', 'email', 'date_of_birth', 'country_of_residence']
@@ -24,13 +24,17 @@ const norm = (r, svc) => {
   }
 }
 
+const ORDER = { ascending: false }
 const fetchAll = async () => {
-  let res = await supabase.from('applications').select(SELECT).order('created_at', { ascending: false }).limit(2000)
-  if (res.error) { // no foreign key to `applicants`: fall back to the flat table
-    console.warn('applicants embed failed, using flat select:', res.error.message)
-    res = await supabase.from('applications').select('*').order('created_at', { ascending: false }).limit(2000)
-  }
-  return res
+  const res = await supabase.from('applications').select(SELECT).order('created_at', ORDER).limit(2000)
+  if (!res.error) return res
+  console.warn('applicants embed failed, joining manually:', res.error.message)
+  const flat = await supabase.from('applications').select('*').order('created_at', ORDER).limit(2000)
+  if (flat.error) return flat
+  const { data: ap, error } = await supabase.from('applicants').select('*').limit(5000)
+  if (error) { console.warn('applicants lookup failed:', error.message); return flat }
+  const byApp = new Map(ap.map((x) => [x.application_id, x]))
+  return { data: flat.data.map((x) => ({ ...x, applicants: byApp.get(x.id) })), error: null }
 }
 
 export function useApplications({ enabled = true, onNew } = {}) {
@@ -44,6 +48,7 @@ export function useApplications({ enabled = true, onNew } = {}) {
   const own = useRef(new Set())
 
   const svcMap = useMemo(() => Object.fromEntries(services.map((s) => [s.id, s.name])), [services])
+  const svcRef = useRef(svcMap); svcRef.current = svcMap
   const rows = useMemo(() => raw.map((r) => norm(r, svcMap)), [raw, svcMap])
 
   const load = useCallback(async () => {
@@ -62,14 +67,26 @@ export function useApplications({ enabled = true, onNew } = {}) {
     })
     const ch = supabase.channel('applications-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, (p) => {
-        if (p.eventType === 'INSERT') (async () => { // realtime payloads carry no joins: refetch this row with its applicant
+        if (p.eventType === 'INSERT') (async () => {
+          // the user app inserts the application first and the applicant row a moment later:
+          // show the row now, then refetch with its applicant before announcing it
+          setRaw((r) => (r.some((x) => x.id === p.new.id) ? r : [shape(p.new), ...r]))
+          await new Promise((res) => setTimeout(res, 1200))
           const { data } = await supabase.from('applications').select(SELECT).eq('id', p.new.id).maybeSingle()
-          const row = shape(data || p.new)
-          setRaw((r) => (r.some((x) => x.id === row.id) ? r : [row, ...r]))
-          if (!own.current.has(row.id)) onNewRef.current?.(norm(row, {}))
+          let row = shape(data || p.new)
+          if (!row.applicants) { // no declared FK: look the applicant up directly
+            const { data: ap } = await supabase.from('applicants').select('*').eq('application_id', p.new.id).maybeSingle()
+            if (ap) row = { ...row, applicants: ap }
+          }
+          setRaw((r) => r.map((x) => (x.id === row.id ? row : x)))
+          if (!own.current.has(row.id)) onNewRef.current?.(norm(row, svcRef.current))
         })()
         if (p.eventType === 'UPDATE') setRaw((r) => r.map((x) => (x.id === p.new.id ? { ...x, ...p.new } : x)))
         if (p.eventType === 'DELETE') setRaw((r) => r.filter((x) => x.id !== p.old.id))
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'applicants' }, (p) => {
+        if (p.eventType === 'DELETE' || !p.new?.application_id) return
+        setRaw((r) => r.map((x) => (x.id === p.new.application_id ? { ...x, applicants: p.new } : x)))
       }).subscribe((s) => {
         if (s === 'SUBSCRIBED') setLive((p) => { if (p === 'offline') load(); return 'live' })
         else if (['TIMED_OUT', 'CLOSED', 'CHANNEL_ERROR'].includes(s)) setLive('offline')
@@ -88,13 +105,8 @@ export function useApplications({ enabled = true, onNew } = {}) {
     setRaw((r) => r.map((x) => (list.includes(x.id) ? { ...x, ...appPatch, ...(x.applicants ? { applicants: { ...x.applicants, ...aPatch } } : {}) } : x)))
     const fail = (m) => { setRaw(prev); return m }
     if (Object.keys(aPatch).length) {
-      for (const id of list) {
-        const row = prev.find((x) => x.id === id)
-        const aid = row?.applicant_id ?? row?.applicants?.id
-        if (!aid) return fail('No applicant is linked to this application')
-        const { data, error } = await supabase.from('applicants').update(aPatch).eq('id', aid).select('id')
-        if (error || !data?.length) return fail(error?.message || NO_ROWS)
-      }
+      const { data, error } = await supabase.from('applicants').update(aPatch).in('application_id', list).select('id')
+      if (error || !data?.length) return fail(error?.message || NO_ROWS)
     }
     if (Object.keys(appPatch).length) {
       const { data, error } = await supabase.from('applications').update(appPatch).in('id', list).select('id')
@@ -102,14 +114,14 @@ export function useApplications({ enabled = true, onNew } = {}) {
     }
   }, [])
 
-  // creates the applicant first, then the application; undoes the applicant if the application insert fails
+  // creates the application first, then its applicant row (applicants.application_id → applications.id); undoes the application if that fails
   const create = useCallback(async ({ service_id, ...applicant }) => {
-    const { data: ap, error: e1 } = await supabase.from('applicants').insert(applicant).select().single()
+    const { data: app, error: e1 } = await supabase.from('applications').insert({ service_id: service_id || null, status: 'pending' }).select().single()
     if (e1) return e1.message
-    const { data, error } = await supabase.from('applications').insert({ applicant_id: ap.id, service_id: service_id || null, status: 'pending' }).select(SELECT).single()
-    if (error) { await supabase.from('applicants').delete().eq('id', ap.id); return error.message }
-    own.current.add(data.id)
-    setRaw((r) => (r.some((x) => x.id === data.id) ? r : [shape({ ...data, applicants: data.applicants ?? ap }), ...r]))
+    own.current.add(app.id)
+    const { data: ap, error: e2 } = await supabase.from('applicants').insert({ ...applicant, application_id: app.id }).select().single()
+    if (e2) { await supabase.from('applications').delete().eq('id', app.id); return e2.message }
+    setRaw((r) => (r.some((x) => x.id === app.id) ? r.map((x) => (x.id === app.id ? { ...x, applicants: ap } : x)) : [shape({ ...app, applicants: ap }), ...r]))
   }, [])
 
   const remove = useCallback(async (ids) => {

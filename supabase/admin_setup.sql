@@ -79,3 +79,9 @@ end $$;
 -- lets the dashboard create signed URLs for files in ANY bucket (passports, photos)
 drop policy if exists "admin read all storage files" on storage.objects;
 create policy "admin read all storage files" on storage.objects for select to authenticated using (public.is_admin());
+
+-- v6: live updates when the applicant row arrives after the application (safe to re-run)
+do $$ begin
+  begin alter publication supabase_realtime add table public.applicants;
+  exception when duplicate_object then null; end;
+end $$;
