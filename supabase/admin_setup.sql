@@ -62,3 +62,20 @@ create policy "admin read applicants"   on public.applicants for select to authe
 create policy "admin update applicants" on public.applicants for update to authenticated using (public.is_admin()) with check (public.is_admin());
 create policy "admin insert applicants" on public.applicants for insert to authenticated with check (public.is_admin());
 create policy "admin delete applicants" on public.applicants for delete to authenticated using (public.is_admin());
+
+-- v5: documents, services and storage files readable by the admin
+grant select on public.documents to authenticated;
+drop policy if exists "admin read documents" on public.documents;
+create policy "admin read documents" on public.documents for select to authenticated using (public.is_admin());
+
+do $$ begin
+  if to_regclass('public.services') is not null then
+    execute 'grant select on public.services to authenticated';
+    execute 'drop policy if exists "admin read services" on public.services';
+    execute 'create policy "admin read services" on public.services for select to authenticated using (public.is_admin())';
+  end if;
+end $$;
+
+-- lets the dashboard create signed URLs for files in ANY bucket (passports, photos)
+drop policy if exists "admin read all storage files" on storage.objects;
+create policy "admin read all storage files" on storage.objects for select to authenticated using (public.is_admin());

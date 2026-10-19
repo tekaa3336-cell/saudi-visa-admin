@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { LayoutDashboard, FileStack, Settings as SettingsIcon, LogOut, Sun, Moon } from 'lucide-react'
 import { useAuth } from './context/AuthContext'
 import { useApplications } from './hooks/useApplications'
@@ -34,7 +34,7 @@ export default function App() {
   const { settings, loading: settingsLoading, error: settingsError, saving, save } = useSettings(ready)
   const cfg = settings ?? DEFAULTS
 
-  const { rows, loading: rowsLoading, error, live, reload, update, create, remove } = useApplications({
+  const { rows, services, loading: rowsLoading, error, live, reload, update, create, remove } = useApplications({
     enabled: ready,
     onNew: (r) => {
       if (cfg.notifications.toast_new) push({ type: 'new', title: 'New application', body: `${r.full_name || 'Applicant'} · ${r.visa_type || 'Visa'}`, row: r })
@@ -42,7 +42,6 @@ export default function App() {
     },
   })
 
-  const visaTypes = useMemo(() => [...new Set([...rows.map((r) => r.visa_type).filter(Boolean), ...Object.keys(cfg.fees)])].sort(), [rows, cfg.fees])
   const pending = rows.filter((r) => r.status === 'pending').length
   const open = useCallback((r) => setOpenId(r.id), [])
 
@@ -91,7 +90,7 @@ export default function App() {
         {route === 'overview' && <Overview rows={rows} loading={rowsLoading} onOpen={open} />}
         {route === 'applications' && (
           <Applications rows={rows} loading={rowsLoading} error={error} reload={reload} onOpen={open} onUpdate={update} onDelete={remove}
-            onCreate={create} notify={notify} visaTypes={visaTypes} fees={cfg.fees} />
+            onCreate={create} notify={notify} services={services} />
         )}
         {route === 'settings' && (
           <Settings settings={settings} loading={settingsLoading} error={settingsError} saving={saving} onSave={save} rows={rows}
@@ -99,7 +98,7 @@ export default function App() {
         )}
       </main>
 
-      {current && <DetailView key={current.id} row={current} live={live} cc={cfg.prefs.country_code} visaTypes={visaTypes}
+      {current && <DetailView key={current.id} row={current} live={live} cc={cfg.prefs.country_code}
         onClose={() => setOpenId(null)} onUpdate={update} onDelete={remove} notify={notify} />}
       <Toasts items={toasts} dismiss={(id) => setToasts((x) => x.filter((t) => t.id !== id))} open={open} />
     </div>
