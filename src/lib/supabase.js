@@ -23,18 +23,35 @@ export async function fileUrl(value, bucket = DOCS_BUCKET) {
 }
 
 // Signed links for a stored file: `url` to view it, `download` forces a save-as with the original file name.
-export async function fileLinks(value, filename, bucket = DOCS_BUCKET) {
-  if (!value) return { error: 'no storage_key' }
-  if (/^https?:\/\//.test(value)) return { url: value, download: value }
-  const sign = (b, k, opts) => supabase.storage.from(b).createSignedUrl(k, 3600, opts)
-  let b = bucket, k = value
-  let res = await sign(b, k)
-  if (res.error && value.includes('/')) { // key stored as "bucket/path/file"
-    const [b2, ...rest] = value.split('/')
-    const alt = await sign(b2, rest.join('/'))
-    if (!alt.error) { res = alt; b = b2; k = rest.join('/') }
+// The bucket is not stored on the document row, so try: the one that worked last time, VITE_DOCS_BUCKET (default
+// "documents"), every bucket the admin may list, then common names. Key variants: as stored, without a leading
+// slash or "documents/" prefix, and as "bucket/path".
+let lastGood
+let listed // undefined = not asked yet
+const GUESSES = ['documents', 'application-documents', 'application_documents', 'applications', 'passports', 'uploads', 'files', 'attachments']
+
+async function candidateBuckets() {
+  if (listed === undefined) {
+    const { data, error } = await supabase.storage.listBuckets()
+    listed = error || !data ? [] : data.map((b) => b.name)
   }
-  if (res.error) return { error: res.error.message }
-  const dl = await sign(b, k, { download: filename || true })
-  return { url: res.data.signedUrl, download: dl.data?.signedUrl || res.data.signedUrl }
+  return [...new Set([lastGood, DOCS_BUCKET, ...listed, ...(listed.length ? [] : GUESSES)].filter(Boolean))]
+}
+
+export async function fileLinks(value, filename) {
+  if (!value) return { error: 'no storage_key on this document' }
+  if (/^https?:\/\//.test(value)) return { url: value, download: value }
+  const clean = value.replace(/^\/+/, '')
+  const keys = [...new Set([value, clean, clean.replace(/^documents\//, '')])]
+  const buckets = await candidateBuckets()
+  const tries = buckets.flatMap((b) => keys.map((k) => [b, k]))
+  if (clean.includes('/')) { const [b, ...rest] = clean.split('/'); tries.push([b, rest.join('/')]) }
+  for (const [b, k] of tries) {
+    const { data, error } = await supabase.storage.from(b).createSignedUrl(k, 3600)
+    if (error || !data?.signedUrl) continue
+    lastGood = b
+    const dl = await supabase.storage.from(b).createSignedUrl(k, 3600, { download: filename || true })
+    return { url: data.signedUrl, download: dl.data?.signedUrl || data.signedUrl, bucket: b }
+  }
+  return { error: `Object not found in any bucket I could try (${buckets.join(', ') || 'none'}). Either the bucket name differs (set VITE_DOCS_BUCKET) or the storage read policy is missing (SQL v5/v8)` }
 }

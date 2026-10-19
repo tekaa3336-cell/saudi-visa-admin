@@ -91,6 +91,11 @@ export function useApplications({ enabled = true, onNew } = {}) {
     })()
   }, [raw, enabled])
 
+  const loadServices = useCallback(() => supabase.from('services').select('*').then(({ data, error }) => {
+    if (error) console.warn('services lookup failed (visa type will show the raw service_id):', error.message)
+    else setServices(data.map((s) => ({ id: s.id, name: serviceName(s), keys: [s.id, s.code, s.slug, s.key].filter((v) => v != null).map(String) })))
+  }), [])
+
   const load = useCallback(async () => {
     setLoading(true)
     const { data, error } = await fetchAll()
@@ -101,10 +106,7 @@ export function useApplications({ enabled = true, onNew } = {}) {
   useEffect(() => {
     if (!enabled) return
     load()
-    supabase.from('services').select('*').then(({ data, error }) => {
-      if (error) console.warn('services lookup failed (visa type will show the raw service_id):', error.message)
-      else setServices(data.map((s) => ({ id: s.id, name: serviceName(s), keys: [s.id, s.code, s.slug, s.key].filter((v) => v != null).map(String) })))
-    })
+    loadServices()
     const ch = supabase.channel('applications-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'applications' }, (p) => {
         if (p.eventType === 'INSERT') (async () => {
@@ -132,7 +134,7 @@ export function useApplications({ enabled = true, onNew } = {}) {
         else if (['TIMED_OUT', 'CLOSED', 'CHANNEL_ERROR'].includes(s)) setLive('offline')
       })
     return () => { supabase.removeChannel(ch) }
-  }, [enabled, load])
+  }, [enabled, load, loadServices])
 
   // Applicant fields are written to `applicants`, everything else to `applications`.
   const update = useCallback(async (ids, patch) => {
@@ -172,5 +174,5 @@ export function useApplications({ enabled = true, onNew } = {}) {
     if (error || !data?.length) { setRaw(prev); return error?.message || NO_ROWS }
   }, [])
 
-  return { rows, services: serviceOptions, loading, error, live, reload: load, update, create, remove }
+  return { rows, services: serviceOptions, reloadServices: loadServices, loading, error, live, reload: load, update, create, remove }
 }

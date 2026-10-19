@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { LayoutDashboard, FileStack, Settings as SettingsIcon, LogOut, Sun, Moon } from 'lucide-react'
+import { LayoutDashboard, FileStack, Briefcase, Settings as SettingsIcon, LogOut, Sun, Moon } from 'lucide-react'
 import { useAuth } from './context/AuthContext'
 import { useApplications } from './hooks/useApplications'
 import { useSettings, DEFAULTS } from './hooks/useSettings'
@@ -11,9 +11,10 @@ import LiveBadge from './components/LiveBadge'
 import Toasts from './components/Toasts'
 import Overview from './pages/Overview'
 import Applications from './pages/Applications'
+import Services from './pages/Services'
 import Settings from './pages/Settings'
 
-const NAV = [[LayoutDashboard, 'Overview', 'overview'], [FileStack, 'Applications', 'applications'], [SettingsIcon, 'Settings', 'settings']]
+const NAV = [[LayoutDashboard, 'Overview', 'overview'], [FileStack, 'Applications', 'applications'], [Briefcase, 'Services', 'services'], [SettingsIcon, 'Settings', 'settings']]
 
 export default function App() {
   const { user, isAdmin, loading, signOut } = useAuth()
@@ -34,7 +35,7 @@ export default function App() {
   const { settings, loading: settingsLoading, error: settingsError, saving, save } = useSettings(ready)
   const cfg = settings ?? DEFAULTS
 
-  const { rows, services, loading: rowsLoading, error, live, reload, update, create, remove } = useApplications({
+  const { rows, services, reloadServices, loading: rowsLoading, error, live, reload, update, create, remove } = useApplications({
     enabled: ready,
     onNew: (r) => {
       if (cfg.notifications.toast_new) push({ type: 'new', title: 'New application', body: `${r.full_name || 'Applicant'} · ${r.visa_type || 'Visa'}`, row: r })
@@ -92,6 +93,7 @@ export default function App() {
           <Applications rows={rows} loading={rowsLoading} error={error} reload={reload} onOpen={open} onUpdate={update} onDelete={remove}
             onCreate={create} notify={notify} services={services} />
         )}
+        {route === 'services' && <Services rows={rows} notify={notify} onChanged={reloadServices} />}
         {route === 'settings' && (
           <Settings settings={settings} loading={settingsLoading} error={settingsError} saving={saving} onSave={save} rows={rows} notify={notify} dark={dark} setDark={setDark} />
         )}

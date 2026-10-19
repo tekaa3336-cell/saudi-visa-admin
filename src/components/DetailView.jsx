@@ -28,7 +28,7 @@ function Doc({ label, doc, loading }) {
           ? <a href={doc.url} target="_blank" rel="noreferrer"><img loading="lazy" src={doc.url} alt={label} className="h-56 w-full bg-slate-100 object-contain dark:bg-black/30" /></a>
           : <a href={doc.url} target="_blank" rel="noreferrer" className="grid h-56 place-items-center text-sm"><span className="flex flex-col items-center gap-2"><FileText size={32} />{doc.file_name || 'Open file'}</span></a>
         : <div className="grid h-56 place-items-center px-3 text-center text-sm text-slate-400">
-            {doc ? `File found but could not be opened: ${doc.error || 'unknown error'}. Check the storage policy (SQL v5) and VITE_DOCS_BUCKET.` : loading ? 'Loading…' : 'No file uploaded'}
+            {doc ? `File found but could not be opened: ${doc.error || 'unknown error'}` : loading ? 'Loading…' : 'No file uploaded'}
           </div>}
       <figcaption className="mt-auto flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-sm dark:border-white/10">
         <span className="truncate text-slate-500" title={label}>{label}</span>
